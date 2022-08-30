@@ -10,15 +10,11 @@ from .utils import pad_with_new_size, crop_with_old_size
 
 
 class OpticsCorrection(nn.Module):
-    def __init__(self, load_weights=True, patch_size=400, overlap_percentage=0.25, 
-                 sigma_b=0.358, c=0.416, polyblur_iteration=1, ker_size=31):
+    def __init__(self, load_weights=True, patch_size=400, overlap_percentage=0.25, ker_size=31):
         super(OpticsCorrection, self).__init__()
         ## Sharpening attributes
         self.patch_size = patch_size
         self.overlap_percentage = overlap_percentage
-        self.sigma_b = sigma_b
-        self.c = c
-        self.polyblur_iteration = polyblur_iteration
         self.ker_size = ker_size
 
         ## Defringing attributes
@@ -29,7 +25,7 @@ class OpticsCorrection(nn.Module):
             self.defringer.eval()
 
 
-    def forward(self, image, batch_size=20):
+    def forward(self, image, batch_size=20, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3):
         assert(image.shape[0] == 1)  # One image at the time
 
         ## Make sure dimensions are even
@@ -57,14 +53,14 @@ class OpticsCorrection(nn.Module):
             patch = torch.concat(patch, dim=0)  # (b,3,pH,pW)
 
             ##### Blind deblurring module (Polyblur)
-            for _ in range(self.polyblur_iteration):
+            for _ in range(polyblur_iteration):
                 ## Predicts blur
-                kernel = blur_estimation(patch, c=self.c, sigma_b=self.sigma_b, ker_size=self.ker_size)
+                kernel = blur_estimation(patch, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
 
                 ## Sharpen the patch with base/detail decomposition
                 patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
                 patch_detail = patch - patch_base
-                patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=1, b=6)  # (b,3,pH,pW)
+                patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
                 patch = patch_detail + patch_base
 
             ##### Defringing module
