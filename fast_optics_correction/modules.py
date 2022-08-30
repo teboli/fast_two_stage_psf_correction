@@ -52,7 +52,7 @@ class OpticsCorrection(nn.Module):
         from tqdm import tqdm
         for n in tqdm(range(n_chuncks)):
             ## Extract the patch
-            IJ_coords_batch = IJ_coords[n:n+batch_size]  # (b,2)
+            IJ_coords_batch = IJ_coords[n*batch_size:(n+1)*batch_size]  # (b,2)
             patch = [img_padded[..., i:i + ps, j:j + ps] for (i, j) in IJ_coords_batch]
             patch = torch.concat(patch, dim=0)  # (b,3,pH,pW)
 
