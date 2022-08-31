@@ -41,8 +41,8 @@ device = torch.device('cuda:0')
 print('Will run on', device)
 
 ## Read the image
-# name = 'facade'; impath = './pictures/facade.jpg'
-name = 'bridge'; impath = './pictures/bridge.jpg'
+name = 'facade'; impath = './pictures/facade.jpg'
+# name = 'bridge'; impath = './pictures/bridge.jpg'
 # name = 'map'; impath = './pictures/map.dng'
 # name = 'montmartre'; impath = '/pictures/montmartre.dng'
 img, c, sigma_b = read_image(impath)
@@ -75,5 +75,5 @@ if impath.split('.')[-1] == 'dng':
 savefolder = './results/'
 os.makedirs(savefolder, exist_ok=True)
 
-imsave(os.path.join(savefolder, '%s_original.jpg' % name), utils.to_uint(img), quality=95)
-imsave(os.path.join(savefolder, '%s_corrected.jpg' % name), utils.to_uint(img_corrected), quality=95)
+imsave(os.path.join(savefolder, '%s_original.jpg' % name), utils.to_uint(img), quality=100)
+imsave(os.path.join(savefolder, '%s_corrected.jpg' % name), utils.to_uint(img_corrected), quality=100)
