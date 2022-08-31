@@ -75,5 +75,5 @@ if impath.split('.')[-1] == 'dng':
 savefolder = './results/'
 os.makedirs(savefolder, exist_ok=True)
 
-imsave(os.path.join(savefolder, '%s_original.jpg' % name), img)
-imsave(os.path.join(savefolder, '%s_corrected.jpg' % name), img_corrected)
+imsave(os.path.join(savefolder, '%s_original.jpg' % name), img, quality=95)
+imsave(os.path.join(savefolder, '%s_corrected.jpg' % name), img_corrected, quality=95)
