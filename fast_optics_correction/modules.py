@@ -25,7 +25,7 @@ class OpticsCorrection(nn.Module):
             self.defringer.eval()
 
 
-    def forward(self, image, batch_size=20, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3):
+    def forward(self, image, batch_size=20, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3, do_decomposition=False):
         assert(image.shape[0] == 1)  # One image at the time
 
         ## Make sure dimensions are even
@@ -45,8 +45,7 @@ class OpticsCorrection(nn.Module):
 
         ## Main loop on patches
         n_chuncks = int(np.ceil(n_blocks / batch_size))
-        from tqdm import tqdm
-        for n in tqdm(range(n_chuncks)):
+        for n in range(n_chuncks):
             ## Extract the patch
             IJ_coords_batch = IJ_coords[n*batch_size:(n+1)*batch_size]  # (b,2)
             patch = [img_padded[..., i:i + ps, j:j + ps] for (i, j) in IJ_coords_batch]
@@ -57,12 +56,14 @@ class OpticsCorrection(nn.Module):
                 ## Predicts blur
                 kernel = blur_estimation(patch, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
 
-                ## Sharpen the patch with base/detail decomposition
-                # patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
-                # patch_detail = patch - patch_base
-                # patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
-                # patch = patch_detail + patch_base
-                patch = mild_inverse_rank3(patch, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
+                ## Sharpen the patch with optional base/detail decomposition
+                if do_decomposition:
+                    patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
+                    patch_detail = patch - patch_base
+                    patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
+                    patch = patch_detail + patch_base
+                else:
+                    patch = mild_inverse_rank3(patch, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
 
             ##### Defringing module
             ## Extract indiviual color channels
