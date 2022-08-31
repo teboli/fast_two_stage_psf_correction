@@ -25,7 +25,8 @@ class OpticsCorrection(nn.Module):
             self.defringer.eval()
 
 
-    def forward(self, image, batch_size=20, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3, do_decomposition=False):
+    def forward(self, image, batch_size=20, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3, 
+                do_decomposition=False, do_halo_removal=False):
         assert(image.shape[0] == 1)  # One image at the time
 
         ## Make sure dimensions are even
@@ -49,27 +50,26 @@ class OpticsCorrection(nn.Module):
             ## Extract the patch
             IJ_coords_batch = IJ_coords[n*batch_size:(n+1)*batch_size]  # (b,2)
             patch = [img_padded[..., i:i + ps, j:j + ps] for (i, j) in IJ_coords_batch]
-            patch = torch.concat(patch, dim=0)  # (b,3,pH,pW)
+            patch = torch.cat(patch, dim=0)  # (b,3,pH,pW)
 
             ##### Blind deblurring module (Polyblur)
             for _ in range(polyblur_iteration):
-                ## Predicts blur
-                kernel = blur_estimation(patch, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
-
-                ## Sharpen the patch with optional base/detail decomposition
                 if do_decomposition:
                     patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
                     patch_detail = patch - patch_base
+                    kernel = blur_estimation(patch_base, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
                     patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
                     patch = patch_detail + patch_base
                 else:
+                    kernel = blur_estimation(patch, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
                     patch = mild_inverse_rank3(patch, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
+                patch = patch.clamp(0, 1)
 
             ##### Defringing module
             ## Extract indiviual color channels
-            patch_red = patch[:, 0:1, ...]
-            patch_green = patch[:, 1:2, ...]
-            patch_blue = patch[:, 2:3, ...]
+            patch_red = patch[:, 0:1]
+            patch_green = patch[:, 1:2]
+            patch_blue = patch[:, 2:3]
 
             ## Inference
             with torch.no_grad():
@@ -77,15 +77,17 @@ class OpticsCorrection(nn.Module):
                 patch_blue_restored = patch_blue - self.defringer(torch.cat([patch_blue, patch_green], dim=1))
 
             ## Replace the patches and weights
-            for b in range(IJ_coords_batch.shape[0]):
-                i, j = IJ_coords_batch[b]
-                restored_image[:, 0:1, i:i + ps, j:j + ps] += window * patch_red_restored[b]
-                restored_image[:, 1:2, i:i + ps, j:j + ps] += window * patch_green[b]
-                restored_image[:, 2:3, i:i + ps, j:j + ps] += window * patch_blue_restored[b]
+            for m in range(IJ_coords_batch.shape[0]):
+                i, j = IJ_coords_batch[m]
+                restored_image[:, 0:1, i:i + ps, j:j + ps] += window * patch_red_restored[m]
+                restored_image[:, 1:2, i:i + ps, j:j + ps] += window * patch_green[m]
+                restored_image[:, 2:3, i:i + ps, j:j + ps] += window * patch_blue_restored[m]
                 window_sum[..., i:i + ps, j:j + ps] += window
 
         ## Normalize and crop the final image
-        return self.postprocess_result(restored_image, window_sum, (h, w))
+        restored_image = self.postprocess_result(restored_image, window_sum, (h, w))
+
+        return restored_image
 
 
     def make_even_dimensions(self, image):

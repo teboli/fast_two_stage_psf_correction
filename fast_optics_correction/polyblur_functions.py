@@ -3,6 +3,8 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
+from kornia import morphology
+
 from . import utils_fft
 from .filters import fourier_gradients
 
@@ -22,6 +24,7 @@ def mild_inverse_rank3(img, kernel, alpha=2, b=3, correlate=False, halo_removal=
     ks = kernel.shape[-1] // 2
     padding = (ks, ks, ks, ks)
     img = F.pad(img, padding, 'replicate')
+    # img = edgetaper.edgetaper(img, kernel, n_tapers=3)
     Y = torch.fft.fft2(img, dim=(-2, -1))
     K = utils_fft.p2o(kernel, img.shape[-2:])  # from NxCxhxw to NxCxHxW
     ## Deblurring
@@ -134,24 +137,20 @@ def transformed_domain_recursive_filter_horizontal(I, D, sigma):
 
 
 def blur_estimation(img, sigma_b, c, ker_size, q=0.0001, n_angles=6, n_interpolated_angles=30):
-    # treat images as grayscale
-    b, c, h, w = img.shape
-    img = img.reshape(b*c, 1, h, w)
-
     # flag saturated areas
-    mask = img > 0.99
+    mask = compute_mask(img)
 
     # normalized images
     img_normalized = normalize(img, q=q)
 
     # compute the image gradients
-    gradients = compute_gradients(img_normalized, mask=mask)
+    gradients = compute_gradients(img_normalized)
 
     # compute the gradiennt magnitudes per orientation
     gradients_magnitude = compute_gradient_magnitudes(gradients, n_angles=n_angles)
 
     # find the maximal direction amongst sampled orientations
-    magnitude_normal, magnitude_ortho, theta = find_blur_direction(gradients_magnitude, n_angles=n_angles,
+    magnitude_normal, magnitude_ortho, theta = find_blur_direction(gradients, gradients_magnitude, mask, n_angles=n_angles,
                                                                    n_interpolated_angles=n_interpolated_angles)
 
     # compute the Gaussian parameters
@@ -160,21 +159,33 @@ def blur_estimation(img, sigma_b, c, ker_size, q=0.0001, n_angles=6, n_interpola
     # create the blur kernel
     kernel = create_gaussian_filter(theta, sigma, rho, ksize=ker_size, device=img.device)
 
-    return kernel.reshape(b, c, ker_size, ker_size)
+    return kernel
+
+
+def compute_mask(img, crop=11):
+    mask = img > 0.99
+    mask = morphology.dilation(mask.float(), torch.ones(5,5).to(mask.device), border_type='replicate', engine='convolution')
+    mask = mask.bool()
+    mask[..., :crop, :] = 0
+    mask[..., -crop:, :] = 0
+    mask[..., :, :crop] = 0
+    mask[..., :, -crop:] = 0
+    return mask
 
 
 def normalize(img, q):
     b, c, h, w = img.shape
-    value_min = torch.quantile(img.view(b, c, -1), q=q, dim=-1, keepdim=True).unsqueeze(-1)  # (b,c,1,1)
-    value_max = torch.quantile(img.view(b, c, -1), q=1-q, dim=-1, keepdims=True).unsqueeze(-1)  # (b,c,1,1)
+    value_min = torch.quantile(img.reshape(b, c, -1), q=q, dim=-1, keepdim=True).unsqueeze(-1)  # (b,c,1,1)
+    value_max = torch.quantile(img.reshape(b, c, -1), q=1-q, dim=-1, keepdims=True).unsqueeze(-1)  # (b,c,1,1)
     img = (img - value_min) / (value_max - value_min)
     return img.clamp(0.0, 1.0)
 
 
-def compute_gradients(img, mask):
+def compute_gradients(img, mask=None):
     gradient_x, gradient_y = fourier_gradients(img)
-    gradient_x[mask] = 0
-    gradient_y[mask] = 0
+    if mask is not None:
+        gradient_x[mask] = 0
+        gradient_y[mask] = 0
     return gradient_x, gradient_y
 
 
@@ -219,7 +230,9 @@ def cubic_interpolator(x_new, x, y):
     return y_new
 
 
-def find_blur_direction(gradient_magnitudes_angles, n_angles=6, n_interpolated_angles=30):
+def find_blur_direction(gradients, gradient_magnitudes_angles, mask, n_angles=6, n_interpolated_angles=30):
+    gradient_x, gradient_y = gradients
+    b = gradient_x.shape[0]
     ## Find thetas
     thetas = torch.linspace(0, 180, n_angles+1, device=gradient_magnitudes_angles.device).unsqueeze(0)  # (1,n)
     interpolated_thetas = torch.arange(0, 180, 180 / n_interpolated_angles, device=thetas.device).unsqueeze(0)  # (1,N)
@@ -228,11 +241,18 @@ def find_blur_direction(gradient_magnitudes_angles, n_angles=6, n_interpolated_a
     ## Compute magnitude in theta
     i_min = torch.argmin(gradient_magnitudes_interpolated_angles, dim=-1, keepdim=True).long()
     thetas_normal = torch.take_along_dim(interpolated_thetas, i_min, dim=-1)
-    magnitudes_normal = torch.take_along_dim(gradient_magnitudes_interpolated_angles, i_min, dim=-1)
+    gradient_color_magnitude_normal = gradient_x * torch.cos(thetas_normal.view(-1, 1, 1, 1) * np.pi / 180) - \
+                                      gradient_y * torch.sin(thetas_normal.view(-1, 1, 1, 1) * np.pi / 180)
+    magnitudes_normal = torch.abs(gradient_color_magnitude_normal)
+    magnitudes_normal[mask] = 0
+    magnitudes_normal, _ = torch.max(magnitudes_normal.view(b, 3, -1), dim=-1)
     ## Compute magnitude in theta+90
     thetas_ortho = (thetas_normal + 90.0) % 180  # angle in [0,pi)
-    i_ortho = (thetas_ortho / (180 / n_interpolated_angles)).long()
-    magnitudes_ortho = torch.take_along_dim(gradient_magnitudes_interpolated_angles, i_ortho, dim=-1)
+    gradient_color_magnitude_ortho = gradient_x * torch.cos(thetas_ortho.view(-1, 1, 1, 1) * np.pi / 180) - \
+                                     gradient_y * torch.sin(thetas_ortho.view(-1, 1, 1, 1) * np.pi / 180)
+    magnitudes_ortho = torch.abs(gradient_color_magnitude_ortho)
+    magnitudes_ortho[mask] = 0
+    magnitudes_ortho, _ = torch.max(magnitudes_ortho.view(b, 3, -1), dim=-1)
     return magnitudes_normal, magnitudes_ortho, thetas_normal * np.pi / 180
 
 
@@ -240,21 +260,25 @@ def compute_gaussian_parameters(magnitudes_normal, magnitudes_ortho, c, sigma_b)
     ## Compute sigma
     sigma = c**2 / (magnitudes_normal ** 2 + 1e-8) - sigma_b**2
     sigma = torch.maximum(sigma, 0.09 * torch.ones_like(sigma))
-    sigma = torch.sqrt(sigma).clamp(0.3, 4.0)
+    sigma[sigma > 16] = 0.09
+    sigma = torch.sqrt(sigma)
+    sigma[magnitudes_normal < 0.1] = 0.3
     ## Compute rho
     rho = c**2 / (magnitudes_ortho ** 2 + 1e-8) - sigma_b**2
-    rho = torch.maximum(sigma, 0.09 * torch.ones_like(rho))
-    rho = torch.sqrt(rho).clamp(0.3, 4.0)
+    rho = torch.maximum(rho, 0.09 * torch.ones_like(rho))
+    rho[rho > 16] = 0.09
+    rho = torch.sqrt(rho)
+    rho[magnitudes_ortho < 0.1] = 0.3
     return sigma, rho
 
 
 def create_gaussian_filter(thetas, sigmas, rhos, ksize, device):
     B = len(sigmas)
-    C = 1
+    C = 3
     # Set random eigen-vals (lambdas) and angle (theta) for COV matrix
     lambda_1 = sigmas
     lambda_2 = rhos
-    thetas = -thetas
+    # thetas = -thetas
 
     # Set COV matrix using Lambdas and Theta
     LAMBDA = torch.zeros(B, C, 2, 2) # (B,C,2,2)
