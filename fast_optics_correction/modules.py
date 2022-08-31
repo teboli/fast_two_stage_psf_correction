@@ -58,10 +58,11 @@ class OpticsCorrection(nn.Module):
                 kernel = blur_estimation(patch, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
 
                 ## Sharpen the patch with base/detail decomposition
-                patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
-                patch_detail = patch - patch_base
-                patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
-                patch = patch_detail + patch_base
+                # patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
+                # patch_detail = patch - patch_base
+                # patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
+                # patch = patch_detail + patch_base
+                patch = mild_inverse_rank3(patch, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
 
             ##### Defringing module
             ## Extract indiviual color channels
