@@ -20,8 +20,8 @@ def read_image(impath):
         raw_img = raw.postprocess(gamma=(1.0, 1.0), output_bps=16, use_camera_wb=True)
         img = raw_img.astype(np.float32) / (2 ** 16 - 1)
     else:
-        c = 0.362
-        sigma_b = 0.468
+        c = 0.371
+        sigma_b = 0.450
     
         img = plt.imread(impath)
         img = img.astype(np.float32) / 255
