@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 import random
 from skimage import img_as_float32, filters

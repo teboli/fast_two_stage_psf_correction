@@ -4,3 +4,4 @@ scikit-image
 rawpy
 torch
 kornia
+tqdm

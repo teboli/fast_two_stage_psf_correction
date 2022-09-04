@@ -6,7 +6,7 @@ optical aberration correction* (paper <a href="https://arxiv.org/abs/2208.00950"
 ### Testing
 
 First install the requirements with
-> pip install requirements.txt
+> pip install -r requirements.txt
 
 You can run the testing script with
 > python test.py
@@ -28,7 +28,14 @@ Please refer to *test.py* for an example.
 
 ### Training
 
-I will post the training code soon. I can share it in the meantime if you send me an email.
+Download the DIV2K dataset and the PSFs at
+> https://edmond.mpdl.mpg.de/file.xhtml?fileId=101784&version=1.0
+
+and run
+> bash prepare_psfs.sh
+
+You are now all set to train the model! You can run the following bash file with preselected options
+> bash run_train.sh
 
 
 ### Troubleshooting

@@ -10,7 +10,7 @@ from .utils import pad_with_new_size, crop_with_old_size
 
 
 class OpticsCorrection(nn.Module):
-    def __init__(self, load_weights=True, patch_size=400, overlap_percentage=0.25, ker_size=31):
+    def __init__(self, load_weights=True, model_type='tiny', patch_size=400, overlap_percentage=0.25, ker_size=31):
         super(OpticsCorrection, self).__init__()
         ## Sharpening attributes
         self.patch_size = patch_size
@@ -18,9 +18,14 @@ class OpticsCorrection(nn.Module):
         self.ker_size = ker_size
 
         ## Defringing attributes
-        self.defringer = ResUNet(nc=[16, 32, 64, 64], in_nc=2, out_nc=1)
+        if model_type == 'tiny':
+            self.defringer = ResUNet(nc=[16, 32, 64, 64], in_nc=2, out_nc=1)
+        elif model_type == 'super_tiny':
+            self.defringer = ResUNet(nc=[16, 16, 32, 32], in_nc=2, out_nc=1)
+        else:
+            self.defringer = ResUNet(nc=[64, 128, 256, 512], in_nc=2, out_nc=1)
         if load_weights:
-            state_dict_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../checkpoints/epoch_1000.pt')
+            state_dict_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../checkpoints/' + model_type + '_epoch_1000.pt')
             self.defringer.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
             self.defringer.eval()
 
