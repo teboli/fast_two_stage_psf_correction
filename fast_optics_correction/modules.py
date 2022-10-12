@@ -4,18 +4,22 @@ import numpy as np
 import os
 
 from . import basicblock as B
-from .polyblur_functions import mild_inverse_rank3, blur_estimation, recursive_filter
-from .utils import pad_with_new_size, crop_with_old_size
+from .polyblur_functions import mild_inverse_rank3, blur_estimation
+from .filters import bilateral_filter
+from . import utils
 
+from time import time
 
 
 class OpticsCorrection(nn.Module):
-    def __init__(self, load_weights=True, model_type='tiny', patch_size=400, overlap_percentage=0.25, ker_size=31):
+    def __init__(self, load_weights=True, model_type='super_tiny', patch_size=400, overlap_percentage=0.25, 
+                 ker_size=31, batch_size=20, n_angles=6, n_interpolated_angles=30):
         super(OpticsCorrection, self).__init__()
         ## Sharpening attributes
         self.patch_size = patch_size
         self.overlap_percentage = overlap_percentage
         self.ker_size = ker_size
+        self.batch_size = batch_size
 
         ## Defringing attributes
         if model_type == 'tiny':
@@ -27,12 +31,24 @@ class OpticsCorrection(nn.Module):
         if load_weights:
             state_dict_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../checkpoints/' + model_type + '_epoch_1000.pt')
             self.defringer.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
-            self.defringer.eval()
+        self.defringer.eval()
+
+        ## Build angle arrays for interpolation in polyblur
+        self.thetas = nn.Parameter(torch.linspace(0, 180, n_angles+1).unsqueeze(0), requires_grad=False)   # (1,n)
+        self.interpolated_thetas = nn.Parameter(torch.arange(0, 180, 180 / n_interpolated_angles).unsqueeze(0), requires_grad=False)   # (1,N)
+        self.freqs = nn.Parameter((torch.arange(0, patch_size) - patch_size//2) / patch_size, requires_grad=False)  # [-0.5,...,0.5)
 
 
-    def forward(self, image, batch_size=20, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3, 
-                do_decomposition=False, do_halo_removal=False):
-        assert(image.shape[0] == 1)  # One image at the time
+    def forward(self, image, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3, q=0,
+                do_decomposition=False, do_halo_removal=False, do_edgetaper=False):
+        assert(image.shape[0] == 1)  # One image at the time for test
+        ## Decide which deblurring method use
+        if image.device == torch.device('cpu'):
+            deblurring_method = 'fft'
+        else:
+            deblurring_method = 'direct'
+        # deblurring_method = 'fft'
+        print('Deblurring method is: %s' % deblurring_method)
 
         ## Make sure dimensions are even
         image, h, w = self.make_even_dimensions(image)
@@ -49,26 +65,45 @@ class OpticsCorrection(nn.Module):
         window = self.build_window(ps, window_type='kaiser').unsqueeze(0).unsqueeze(0).to(image.device)  # (1,1,pH,pW)
         window_sum = torch.zeros((1, 1, new_h, new_w)).to(image.device)  # (1,1,H,W)
 
+        ## Get precomputed CUDA arrays
+        thetas = self.thetas
+        interpolated_thetas = self.interpolated_thetas
+        freqs = None
+
         ## Main loop on patches
-        n_chuncks = int(np.ceil(n_blocks / batch_size))
+        n_chuncks = int(np.ceil(n_blocks / self.batch_size))
         for n in range(n_chuncks):
             ## Extract the patch
-            IJ_coords_batch = IJ_coords[n*batch_size:(n+1)*batch_size]  # (b,2)
+            IJ_coords_batch = IJ_coords[n*self.batch_size:(n+1)*self.batch_size]  # (b,2)
             patch = [img_padded[..., i:i + ps, j:j + ps] for (i, j) in IJ_coords_batch]
             patch = torch.cat(patch, dim=0)  # (b,3,pH,pW)
 
             ##### Blind deblurring module (Polyblur)
+            if do_decomposition:
+                ## Run polyblur and the base image of a base/detail decomposition to not
+                ## magnify noise and compression artifacts.
+                start = time()
+                patch_base = bilateral_filter(patch)
+                print('Bilateral filter: %1.3f' % (time() - start))
+                patch_detail = patch - patch_base
+            else:
+                ## Run polyblur on the image if noise/artifacts are deemed small enough.
+                patch_base = patch
             for _ in range(polyblur_iteration):
-                if do_decomposition:
-                    patch_base = recursive_filter(patch, sigma_s=2, sigma_r=0.1)
-                    patch_detail = patch - patch_base
-                    kernel = blur_estimation(patch_base, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
-                    patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
-                    patch = patch_detail + patch_base
-                else:
-                    kernel = blur_estimation(patch, c=c, sigma_b=sigma_b, ker_size=self.ker_size)
-                    patch = mild_inverse_rank3(patch, kernel, correlate=True, halo_removal=False, alpha=alpha, b=b)  # (b,3,pH,pW)
-                patch = patch.clamp(0, 1)
+                start = time()
+                kernel = blur_estimation(patch_base, c=c, sigma_b=sigma_b, ker_size=self.ker_size, q=q,
+                                         thetas=thetas, interpolated_thetas=interpolated_thetas, freqs=freqs)
+                print('Estimation:       %1.3f' % (time() - start))
+                start = time()
+                patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, 
+                                                do_halo_removal=do_halo_removal, do_edgetaper=do_edgetaper,
+                                                alpha=alpha, b=b, method=deblurring_method)  # (b,3,pH,pW)
+                print('Deblurring:       %1.3f' % (time() - start))
+            if do_decomposition:
+                patch = patch_detail + patch_base
+            else:
+                patch = patch_base
+            patch = patch.clamp(0, 1)
 
             ##### Defringing module
             ## Extract indiviual color channels
@@ -78,16 +113,22 @@ class OpticsCorrection(nn.Module):
 
             ## Inference
             with torch.no_grad():
+                start = time()
                 patch_red_restored = patch_red - self.defringer(torch.cat([patch_red, patch_green], dim=1))
                 patch_blue_restored = patch_blue - self.defringer(torch.cat([patch_blue, patch_green], dim=1))
+                print('Defringing:       %1.3f' % (time() - start))
 
             ## Replace the patches and weights
+            # TODO: Stitching is super slow!  -- concurrent at first glance
+            # may use reduce
+            start = time()
             for m in range(IJ_coords_batch.shape[0]):
                 i, j = IJ_coords_batch[m]
                 restored_image[:, 0:1, i:i + ps, j:j + ps] += window * patch_red_restored[m]
                 restored_image[:, 1:2, i:i + ps, j:j + ps] += window * patch_green[m]
                 restored_image[:, 2:3, i:i + ps, j:j + ps] += window * patch_blue_restored[m]
                 window_sum[..., i:i + ps, j:j + ps] += window
+            print('Stitching:        %1.3f' % (time() - start))
 
         ## Normalize and crop the final image
         restored_image = self.postprocess_result(restored_image, window_sum, (h, w))
@@ -110,13 +151,13 @@ class OpticsCorrection(nn.Module):
         h, w = image.shape[-2:]
         new_h = int(np.ceil(h / self.patch_size) * self.patch_size)
         new_w = int(np.ceil(w / self.patch_size) * self.patch_size)
-        img_padded = pad_with_new_size(image, (new_h, new_w), mode='replicate')
+        img_padded = utils.pad_with_new_size(image, (new_h, new_w), mode='replicate')
         return img_padded, new_h, new_w
 
 
     def postprocess_result(self, restored_image, window_sum, old_size):
         restored_image = restored_image / (window_sum + 1e-8)
-        restored_image = crop_with_old_size(restored_image, old_size)
+        restored_image = utils.crop_with_old_size(restored_image, old_size)
         restored_image = torch.clamp(restored_image, 0.0, 1.0)
         return restored_image
 

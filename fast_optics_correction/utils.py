@@ -2,7 +2,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.fft
-from skimage import img_as_float32
+from skimage import img_as_float32, io
+import rawpy
+
+
+
+#######################
+### Type conversion ###
+######################
 
 
 def to_tensor(x, to_type=torch.float):
@@ -44,6 +51,32 @@ def to_uint(img):
     img = (255*img).astype(np.uint8)
     return img
 
+
+#######################
+######## I/O ##########
+#######################
+
+
+def read_image(impath):
+    # make the difference between reading raw (DNG format only) or SRGB image
+    if impath.split('.')[-1] == 'dng':
+        raw = rawpy.imread(impath)
+        raw_img = raw.postprocess(gamma=(1.0, 1.0), output_bps=16, use_camera_wb=True)
+        img = raw_img.astype(np.float32) / (2 ** 16 - 1)
+    else:
+        img = io.imread(impath)
+        img = img.astype(np.float32) / 255
+        img = np.clip(img, a_min=1e-8, a_max=1.0) ** 2.2   # Linearize the srgb image
+    return img
+
+
+def write_image(impath, img):
+    io.imsave(impath, to_uint(img))
+
+
+#######################
+###### Formating ######
+#######################
 
 def rgb_to_raw(rgb):
     """Simple (H,W,3) RGB image conversion to (H/2,W/2,4) raw format with RGGB pattern."""
@@ -157,6 +190,10 @@ def space_to_depth(x, r):
     return F.pixel_unshuffle(x, r)
 
 
+########################
+####### Crop/Pad #######
+########################
+
 def pad_with_new_size(img, new_size, mode='constant'):
     h, w = img.shape[-2:]
     new_h, new_w = new_size
@@ -185,3 +222,20 @@ def crop_with_old_size(img, old_size):
     if crop_bottom > 0:
         img = img[..., :-crop_bottom, :]
     return img
+
+
+def pad_with_kernel(img, kernel=None, ksize=3, mode='replicate'):
+    if kernel is not None:
+        ks = kernel.shape[-1] // 2
+    else:
+        ks = ksize // 2
+    return F.pad(img, (ks, ks, ks, ks), mode=mode)
+
+
+def crop_with_kernel(img, kernel=None, ksize=3):
+    if kernel is not None:
+        ks = kernel.shape[-1] // 2
+    else:
+        ks = ksize // 2
+    return img[..., ks:-ks, ks:-ks]
+
