@@ -1,5 +1,6 @@
 numpy
 scipy
+opencv-python
 scikit-image
 rawpy
 torch
