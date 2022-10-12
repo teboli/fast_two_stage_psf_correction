@@ -2,7 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.fft
-from skimage import img_as_float32, io
+from skimage import img_as_float32
+import cv2
 import rawpy
 
 
@@ -64,14 +65,14 @@ def read_image(impath):
         raw_img = raw.postprocess(gamma=(1.0, 1.0), output_bps=16, use_camera_wb=True)
         img = raw_img.astype(np.float32) / (2 ** 16 - 1)
     else:
-        img = io.imread(impath)
+        img = cv2.imread(impath)
         img = img.astype(np.float32) / 255
         img = np.clip(img, a_min=1e-8, a_max=1.0) ** 2.2   # Linearize the srgb image
     return img
 
 
 def write_image(impath, img):
-    io.imsave(impath, to_uint(img))
+    cv2.imwrite(impath, img*255)
 
 
 #######################

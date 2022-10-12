@@ -5,27 +5,30 @@ import numpy as np
 import torch
 
 from fast_optics_correction import OpticsCorrection
-from fast_optics_correction import utils
+from fast_optics_correction import utils, filters
 
 
 ## Parameters
-c = 0.416
+c = 0.416 
 sigma_b = 0.358
+# c = 0.362
+# sigma_b = 0.468
 q = 0.0001
 patch_size = 400
 overlap_percentage = 0.25
+# overlap_percentage = 0.00
 ker_size = 25
 polyblur_iteration = 3  # can be also 2 or 3
 # alpha = 2; b = 4
 # alpha = 1; b = 6
 # alpha = 3; b = 6
 alpha = 6; b = 1
-batch_size = 60
-do_decomposition = False  # should we do a base/detail decomp. for not enhancing noise and artifacts?
-do_edgetaper = True
+batch_size = 64
+do_decomposition = True  # should we do a base/detail decomp. for not enhancing noise and artifacts?
+do_edgetaper = False
 do_halo_removal = True
 
-device = torch.device('cuda:1')
+device = torch.device('cuda:0')
 print('Will run on', device)
 
 ## Read the image
@@ -43,20 +46,26 @@ model = model.to(device)
 
 ## CUDA warmup -- to not bias running time
 torch.fft.fft2(torch.randn(60,3,400,400, device=device))
-model.defringer(torch.randn(10,2,400,400, device=device))
+with torch.no_grad():
+    model.defringer(torch.randn(60,2,400,400, device=device))
+filters.extract_tiles(torch.randn(10,3,400,400, device=device), (3,3))
+filters.bilateral_filter(torch.randn(10,3,400,400, device=device))
+torch.randn(10,3,400,400, device=device).cpu()
 
 ## Inference
-img = utils.to_tensor(img).unsqueeze(0).to(device)
+img = utils.to_tensor(img).unsqueeze(0)  # Define the array on the CPU! (important for larger images)
+img = img.to(device)
 tic = time.time()
-img_corrected = model(img, sigma_b=sigma_b, c=c, q=q,
-                      polyblur_iteration=polyblur_iteration, alpha=alpha, b=b,
-                      do_decomposition=do_decomposition, 
-                      do_halo_removal=do_halo_removal,
-                      do_edgetaper=do_edgetaper)
+with torch.no_grad():
+    img_corrected = model(img, sigma_b=sigma_b, c=c, q=q,
+                          polyblur_iteration=polyblur_iteration, alpha=alpha, b=b,
+                          do_decomposition=do_decomposition, 
+                          do_halo_removal=do_halo_removal,
+                          do_edgetaper=do_edgetaper)
 tac = time.time()
+print('Restoration took  %1.3f seconds.' % (tac - tic))
 img_corrected = utils.to_array(img_corrected.cpu())
 img = utils.to_array(img.cpu())
-print('Restoration took %2.2f seconds.' % (tac - tic))
 
 
 ## Gamma curve as simple ISP
