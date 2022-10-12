@@ -145,40 +145,26 @@ def halo_masking(img, imout, grad_img=None):
 
 def blur_estimation(img, sigma_b, c, ker_size, q, thetas, interpolated_thetas, freqs=None):
     # flag saturated areas and edges
-    start = time()
     mask = compute_mask(img)
-    print('    mask:      %1.3f' % (time() - start))
 
     # normalized images
-    start = time()
     img_normalized = normalize(img, q=q)
-    print('    normaliz:  %1.3f' % (time() - start))
 
     # compute the image gradients
-    start = time()
     gradients = compute_gradients(img_normalized, mask, freqs)
-    print('    gradient:  %1.3f' % (time() - start))
 
     # compute the gradiennt magnitudes per orientation
-    start = time()
     gradients_magnitude = compute_gradient_magnitudes(gradients, thetas)
-    print('    magntiude: %1.3f' % (time() - start))
 
     # find the maximal direction amongst sampled orientations
-    start = time()
     magnitude_normal, magnitude_ortho, theta = find_blur_direction(gradients, gradients_magnitude,
                                                                    thetas, interpolated_thetas)
-    print('    direction: %1.3f' % (time() - start))
 
     # compute the Gaussian parameters
-    start = time()
     sigma, rho = compute_gaussian_parameters(magnitude_normal, magnitude_ortho, c=c, sigma_b=sigma_b)
-    print('    params:    %1.3f' % (time() - start))
 
     # create the blur kernel
-    start = time()
     kernel = create_gaussian_filter(theta, sigma, rho, ksize=ker_size)
-    print('    kernel:    %1.3f' % (time() - start))
 
     return kernel
 
@@ -219,7 +205,6 @@ def compute_gradient_magnitudes(gradients, angles):
     gradient_x_gray = gradient_x.mean(1, keepdim=True).unsqueeze(1)  # (B,1,1,H,W)
     gradient_y_gray = gradient_y.mean(1, keepdim=True).unsqueeze(1)  # (B,1,1,H,W)
     angles = (angles / 180 * np.pi).view(1, -1, 1, 1, 1)
-    # angles = torch.linspace(0, np.pi, n_angles + 1, device=gradient_x.device).view(1, -1, 1, 1, 1)  # (1,N,1,1,1)
     cos = torch.cos(angles)
     sin = torch.sin(angles)
     gradient_magnitudes_angles = (cos * gradient_x_gray - sin * gradient_y_gray).abs()  # (B,N,1,H,W)

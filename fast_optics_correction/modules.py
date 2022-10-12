@@ -42,7 +42,8 @@ class OpticsCorrection(nn.Module):
 
 
     def forward(self, image, c=0.358, sigma_b=0.451, polyblur_iteration=1, alpha=2, b=3, q=0,
-                do_decomposition=False, do_halo_removal=False, do_edgetaper=False):
+                do_decomposition=False, do_halo_removal=False, do_edgetaper=False, 
+                sigma_s=200, sigma_r=0.1):
         assert(image.shape[0] == 1)  # One image at the time for test
         ## Device on which run the computation -- based on where is the model
         device = self.thetas.device
@@ -105,17 +106,9 @@ class OpticsCorrection(nn.Module):
             n_blocks = patches.shape[0]
 
             ## Create the array for outputing results
-            # window_sum = kornia.contrib.combine_tensor_patches(window.repeat(n_blocks, 1, 1, 1).unsqueeze(0), 
-            #                                                    original_size, window_size, stride, padding)
-            print(original_size)
-            print(window_size)
-            print(padding)
-            print(image.shape)
-            print(n_blocks)
             window_sum = self.fold(window.repeat(n_blocks, 1, 1, 1).unsqueeze(0), 
-                                                               original_size, window_size, stride, padding)
+                                   original_size, window_size, stride, padding)
  
-            print('Interplay:        %1.3f' % (time() - start))
             ## Main loop on patches
             n_chuncks = int(np.ceil(n_blocks / bs))
             for n in range(n_chuncks):
@@ -132,22 +125,22 @@ class OpticsCorrection(nn.Module):
                     ## Run polyblur and the base image of a base/detail decomposition to not
                     ## magnify noise and compression artifacts.
                     start = time()
-                    patch_base = filters.recursive_filter(patch, sigma_s=200, sigma_r=0.1, num_iterations=3)
+                    patch_base = filters.recursive_filter(patch, sigma_s=sigma_s, sigma_r=sigma_r, num_iterations=3)
                     print('Decompostion:     %1.3f' % (time() - start))
                     patch_detail = patch - patch_base
                 else:
                     ## Run polyblur on the image if noise/artifacts are deemed small enough.
                     patch_base = patch
-                for _ in range(polyblur_iteration):
+                for m in range(polyblur_iteration):
                     start = time()
                     kernel = blur_estimation(patch_base, c=c, sigma_b=sigma_b, ker_size=self.ker_size, q=q,
                                              thetas=thetas, interpolated_thetas=interpolated_thetas, freqs=freqs)
-                    print('Estimation:       %1.3f' % (time() - start))
+                    print('Estimation %d:     %1.3f' % (m+1, time() - start))
                     start = time()
                     patch_base = mild_inverse_rank3(patch_base, kernel, correlate=True, 
                                                     do_halo_removal=do_halo_removal, do_edgetaper=do_edgetaper,
                                                     alpha=alpha, b=b, method=deblurring_method, grad_img=grad_patch)  # (b,3,pH,pW)
-                    print('Deblurring:       %1.3f' % (time() - start))
+                    print('Deblurring %d:     %1.3f' % (m+1, time() - start))
                 if do_decomposition:
                     patch = patch_detail + patch_base
                 else:
@@ -181,7 +174,7 @@ class OpticsCorrection(nn.Module):
         else:
             image = frames[0]
         del frames
-        print('Concatene:        %1.3f' % (time() - start))
+        print('Concatenate:      %1.3f' % (time() - start))
 
         ## Undo the flip if the image was in portrait format
         if do_flip:
