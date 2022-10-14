@@ -1,10 +1,11 @@
 # Fast two-step blind optical aberration correction
 
 This repository contains the official implemention of the ECCV'22 paper *Fast two-step blind 
-optical aberration correction* (paper <a href="https://arxiv.org/abs/2208.00950">here</a>).
+optical aberration correction*: <a href="https://arxiv.org/abs/2208.00950">[paper]</a><a href="https://teboli.github.io/pages/fast_optical/fast_optical.html">[website]</a><a href="https://ipolcore.ipol.im/demo/clientApp/demo.html?id=77777000333">[demo]</a>.
 
 ### Updates
-10/12: I pushed a faster and better curated version of the code. Check also the Pypi package (see below).
+10/14: Check the online demo using this code <a href="https://ipolcore.ipol.im/demo/clientApp/demo.html?id=77777000333">here</a>!
+10/12: I pushed a faster and better curated version of the code.
 
 ### Installation
 
