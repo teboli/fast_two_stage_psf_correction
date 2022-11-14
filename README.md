@@ -1,7 +1,7 @@
 # Fast two-step blind optical aberration correction
 
 This repository contains the official implemention of the ECCV'22 paper *Fast two-step blind 
-optical aberration correction*: <a href="https://arxiv.org/abs/2208.00950">[paper]</a><a href="https://teboli.github.io/pages/fast_optical/fast_optical.html">[website]</a><a href="https://ipolcore.ipol.im/demo/clientApp/demo.html?id=77777000333">[demo]</a>.
+optical aberration correction*: <a href="https://arxiv.org/abs/2208.00950">[paper]</a><a href="https://teboli.github.io/fast_optical.html">[website]</a><a href="https://ipolcore.ipol.im/demo/clientApp/demo.html?id=77777000333">[demo]</a>.
 
 ### Updates
 10/14: Check the online demo using this code <a href="https://ipolcore.ipol.im/demo/clientApp/demo.html?id=77777000333">here</a>!
